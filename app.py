@@ -48,7 +48,7 @@ if uploaded_file is not None:
             # Birleştir
             df_parsed = pd.DataFrame(sonuclar)
             df_final = pd.concat([
-                df[["islem_tarihi", "fis_no", "islem_yonu", "aciklama_ham"]].reset_index(drop=True),
+                df.reset_index(drop=True),
                 df_parsed.reset_index(drop=True)
             ], axis=1)
             
