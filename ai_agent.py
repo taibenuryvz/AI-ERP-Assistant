@@ -11,6 +11,7 @@ from typing import Dict, Optional
 import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
+is_first_call = True  # İlk çağrıyı takip etmek için global değişken
 
 # GÜVENLİK GÜNCELLEMESİ: GitHub Push Protection
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
@@ -28,13 +29,13 @@ def get_system_prompt() -> str:
             return f.read()
     return "Lütfen çıktıyı sadece JSON olarak verin."
 
-def mock_ai_response(aciklama: str) -> Dict:
-    """API çalışmazsa sistemin çökmemesi için sahte (simülasyon) cevap üretir."""
+def mock_ai_response(aciklama: str, fallback_reason: str = "Bilinmeyen Neden") -> Dict:
+    """API çalışmazsa sistemin çökmemesi için sahte (simülasyon) cevap üretir. Sessiz fallback olmaması için sebebi (reason) kaydeder."""
     up_acik = aciklama.upper()
     tip = "DIGER"
     cari = "BELİRSİZ"
     hesap = "999"
-    explanation = "Standart AI ayrıştırması kullanıldı."
+    explanation = f"Fallback Reason: {fallback_reason}"
     confidence = 50
     
     if "KİRA" in up_acik or "KIRA" in up_acik:
@@ -69,9 +70,12 @@ def mock_ai_response(aciklama: str) -> Dict:
     }
 
 def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
-    """Gemini API'ye istek atar, hata olursa Mock Mode çalışır."""
+    """Gemini API'ye istek atar, hata olursa Mock Mode çalışır ve gerçek hatayı loglar."""
+    global is_first_call
+    
     if not GEMINI_API_KEY:
-        return mock_ai_response(aciklama)
+        print("Gemini API Error: Missing API Key in environment.")
+        return mock_ai_response(aciklama, fallback_reason="Invalid/Missing API Key")
         
     try:
         model = genai.GenerativeModel(
@@ -83,12 +87,24 @@ def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
         prompt = f"Yön: {islem_yonu} | Açıklama: {aciklama}"
         response = model.generate_content(prompt)
         
+        if is_first_call:
+            print("\n=== İLK İŞLEM İÇİN GEMINI RAW RESPONSE ===")
+            print(f"Prompt: {prompt}")
+            print(f"Response: {response.text if hasattr(response, 'text') else 'NO TEXT'}")
+            print("==========================================\n")
+            is_first_call = False
+            
         if response.text:
             result_json = response.text.replace("```json", "").replace("```", "").strip()
             return json.loads(result_json)
         else:
-            return mock_ai_response(aciklama)
+            print("Gemini API Error: Empty text in response.")
+            return mock_ai_response(aciklama, fallback_reason="Empty AI Response")
             
+    except json.JSONDecodeError as e:
+        print(f"Gemini API Error: JSON Parse Error -> {e}")
+        return mock_ai_response(aciklama, fallback_reason=f"JSON Parse Error: {str(e)}")
     except Exception as e:
+        print(f"Gemini API Error: {str(e)}")
         logger.error(f"Gemini API hatası: {e}")
-        return mock_ai_response(aciklama)
+        return mock_ai_response(aciklama, fallback_reason=str(e))
