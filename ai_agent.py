@@ -8,7 +8,8 @@ import json
 import logging
 import os
 from typing import Dict, Optional
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,8 +20,7 @@ is_first_call = True  # İlk çağrıyı takip etmek için global değişken
 # GÜVENLİK GÜNCELLEMESİ: GitHub Push Protection
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # 1. PROMPT REPOSITORY (Prompt dosyasından dinamik okuma)
 PROMPT_FILE_PATH = os.path.join(os.path.dirname(__file__), "prompts", "transaction_parser_v1.md")
@@ -76,19 +76,22 @@ def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
     """Gemini API'ye istek atar, hata olursa Mock Mode çalışır ve gerçek hatayı loglar."""
     global is_first_call
     
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or client is None:
         print("Gemini API Error: Missing API Key in environment.")
         return mock_ai_response(aciklama, fallback_reason="Invalid/Missing API Key")
         
     try:
-        model = genai.GenerativeModel(
-            'gemini-2.5-flash',
-            system_instruction=get_system_prompt(),
-            generation_config={"response_mime_type": "application/json", "temperature": 0.1}
-        )
-        
         prompt = f"Yön: {islem_yonu} | Açıklama: {aciklama}"
-        response = model.generate_content(prompt)
+        
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=get_system_prompt(),
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
+        )
         
         if is_first_call:
             print("\n=== İLK İŞLEM İÇİN GEMINI RAW RESPONSE ===")
