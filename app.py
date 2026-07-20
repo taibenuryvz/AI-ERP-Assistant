@@ -39,6 +39,7 @@ if uploaded_file is not None:
                 
                 parsed = satir_parse_et(str(row.get("aciklama_ham", "")), str(row.get("islem_yonu", "")))
                 sonuclar.append(parsed)
+                time.sleep(1.5)  # Free tier RPM limitini aşmamak için
             
             # İşlem bitti
             progress_bar.progress(1.0)

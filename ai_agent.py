@@ -7,6 +7,8 @@ Eğer API key geçersizse veya sınır aşılmışsa Simülasyon (Mock) modu dev
 import json
 import logging
 import os
+import time
+import random
 from typing import Dict, Optional
 from google import genai
 from google.genai import types
@@ -72,45 +74,55 @@ def mock_ai_response(aciklama: str, fallback_reason: str = "Bilinmeyen Neden") -
         "explanation": explanation
     }
 
-def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
-    """Gemini API'ye istek atar, hata olursa Mock Mode çalışır ve gerçek hatayı loglar."""
+def parse_with_ai(aciklama: str, islem_yonu: str, max_retries: int = 3) -> Optional[Dict]:
+    """Gemini API'ye istek atar, limit aşımında bekleyip tekrar dener."""
     global is_first_call
     
     if not GEMINI_API_KEY or client is None:
         print("Gemini API Error: Missing API Key in environment.")
         return mock_ai_response(aciklama, fallback_reason="Invalid/Missing API Key")
         
-    try:
-        prompt = f"Yön: {islem_yonu} | Açıklama: {aciklama}"
-        
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=get_system_prompt(),
-                response_mime_type="application/json",
-                temperature=0.1,
-            ),
-        )
-        
-        if is_first_call:
-            print("\n=== İLK İŞLEM İÇİN GEMINI RAW RESPONSE ===")
-            print(f"Prompt: {prompt}")
-            print(f"Response: {response.text if hasattr(response, 'text') else 'NO TEXT'}")
-            print("==========================================\n")
-            is_first_call = False
+    prompt = f"Yön: {islem_yonu} | Açıklama: {aciklama}"
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=get_system_prompt(),
+                    response_mime_type="application/json",
+                    temperature=0.1,
+                ),
+            )
             
-        if response.text:
-            result_json = response.text.replace("```json", "").replace("```", "").strip()
-            return json.loads(result_json)
-        else:
-            print("Gemini API Error: Empty text in response.")
-            return mock_ai_response(aciklama, fallback_reason="Empty AI Response")
+            if is_first_call:
+                print("\n=== İLK İŞLEM İÇİN GEMINI RAW RESPONSE ===")
+                print(f"Prompt: {prompt}")
+                print(f"Response: {response.text if hasattr(response, 'text') else 'NO TEXT'}")
+                print("==========================================\n")
+                is_first_call = False
+                
+            if response.text:
+                result_json = response.text.replace("```json", "").replace("```", "").strip()
+                return json.loads(result_json)
+            else:
+                print("Gemini API Error: Empty text in response.")
+                return mock_ai_response(aciklama, fallback_reason="Empty AI Response")
+                
+        except json.JSONDecodeError as e:
+            print(f"Gemini API Error: JSON Parse Error -> {e}")
+            return mock_ai_response(aciklama, fallback_reason=f"JSON Parse Error: {str(e)}")
+        except Exception as e:
+            err_str = str(e)
+            print(f"Gemini API Error (attempt {attempt+1}): {err_str}")
+            logger.error(f"Gemini API hatası: {e}")
             
-    except json.JSONDecodeError as e:
-        print(f"Gemini API Error: JSON Parse Error -> {e}")
-        return mock_ai_response(aciklama, fallback_reason=f"JSON Parse Error: {str(e)}")
-    except Exception as e:
-        print(f"Gemini API Error: {str(e)}")
-        logger.error(f"Gemini API hatası: {e}")
-        return mock_ai_response(aciklama, fallback_reason=str(e))
+            if "RESOURCE_EXHAUSTED" in err_str or "429" in err_str:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                time.sleep(wait_time)
+                continue
+            else:
+                return mock_ai_response(aciklama, fallback_reason=err_str)
+                
+    return mock_ai_response(aciklama, fallback_reason="Rate limit: max retries exceeded")
