@@ -6,66 +6,66 @@ Eğer API key geçersizse veya sınır aşılmışsa Simülasyon (Mock) modu dev
 
 import json
 import logging
+import os
 from typing import Dict, Optional
 import google.generativeai as genai
-import os
 
 logger = logging.getLogger(__name__)
 
 # GÜVENLİK GÜNCELLEMESİ: GitHub Push Protection
-# API anahtarını asla kod içine açık (hardcoded) yazmıyoruz. Çevre değişkeninden (.env) okuyoruz.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-SYSTEM_PROMPT = """
-Sen Ziraat Katılım Bankası ve genel Türk bankacılık ekstre formatlarını çok iyi bilen bir veri ayrıştırma (parsing) asistanısın.
-Sana verilen banka ekstresi açıklamasını incele ve aşağıdaki alanları çıkararak SADECE JSON formatında yanıt dön.
+# 1. PROMPT REPOSITORY (Prompt dosyasından dinamik okuma)
+PROMPT_FILE_PATH = os.path.join(os.path.dirname(__file__), "prompts", "transaction_parser_v1.md")
 
-{
-  "islem_tipi": "",
-  "karsitaraf_ad": "",
-  "karsitaraf_iban": "",
-  "karsitaraf_banka": "",
-  "aciklama_temiz": "",
-  "cari_durumu": "",
-  "muhasebe_hesabi": ""
-}
-Kurallar:
-- Güven skoru vb. ekleme. Sadece JSON objesi döndür.
-- Karsitaraf adını bulamıyorsan boş bırak.
-"""
+def get_system_prompt() -> str:
+    """Sistem promptunu v1.md dosyasından yükler."""
+    if os.path.exists(PROMPT_FILE_PATH):
+        with open(PROMPT_FILE_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    return "Lütfen çıktıyı sadece JSON olarak verin."
 
 def mock_ai_response(aciklama: str) -> Dict:
     """API çalışmazsa sistemin çökmemesi için sahte (simülasyon) cevap üretir."""
-    # Basit bir kelime tahmini
     up_acik = aciklama.upper()
     tip = "DIGER"
     cari = "BELİRSİZ"
     hesap = "999"
+    explanation = "Standart AI ayrıştırması kullanıldı."
+    confidence = 50
     
     if "KİRA" in up_acik or "KIRA" in up_acik:
-        tip = "KIRA_ODEMESI"
+        tip = "MASRAF"
         cari = "CARİ_BELLİ"
         hesap = "770"
+        explanation = "Kira kelimesi bulunduğu için Masraf olarak sınıflandırıldı."
+        confidence = 94
     elif "SİGORTA" in up_acik or "SIGORTA" in up_acik:
-        tip = "SIGORTA"
+        tip = "MASRAF"
         cari = "CARİ_BELLİ"
         hesap = "770"
+        explanation = "Sigorta poliçesi ödemesi tespit edildi."
+        confidence = 92
     elif "A.Ş" in up_acik or "LTD" in up_acik:
-        tip = "HAVALE_GIDEN"
+        tip = "HAVALE"
         cari = "CARİ_BELLİ"
         hesap = "320"
+        explanation = "Anonim/Limited şirket ibaresi (Tüzel kişi) tespit edildi."
+        confidence = 88
         
     return {
         "islem_tipi": tip,
-        "karsitaraf_ad": "AI_TEST_FİRMA_ADI",
+        "karsitaraf_ad": "MOCK_FIRMA",
         "karsitaraf_iban": "",
         "karsitaraf_banka": "",
         "aciklama_temiz": f"[AI_SIM] {aciklama[:40]}...",
         "cari_durumu": cari,
-        "muhasebe_hesabi": hesap
+        "muhasebe_hesabi": hesap,
+        "confidence_score": confidence,
+        "explanation": explanation
     }
 
 def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
@@ -76,7 +76,7 @@ def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
     try:
         model = genai.GenerativeModel(
             'gemini-1.5-flash',
-            system_instruction=SYSTEM_PROMPT,
+            system_instruction=get_system_prompt(),
             generation_config={"response_mime_type": "application/json", "temperature": 0.1}
         )
         
@@ -91,5 +91,4 @@ def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
             
     except Exception as e:
         logger.error(f"Gemini API hatası: {e}")
-        # Hata anında Simülasyon'a düş
         return mock_ai_response(aciklama)

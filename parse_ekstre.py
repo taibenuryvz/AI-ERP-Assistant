@@ -717,29 +717,32 @@ BOSH_SONUC = {
     "aciklama_temiz"  : "",
     "cari_durumu"     : "BELİRSİZ",
     "muhasebe_hesabi" : "",
+    "confidence_score": 0,
+    "explanation"     : ""
 }
 
 def satir_parse_et(aciklama: str, islem_yonu: str) -> dict:
-    # Önce Hızlı & Ücretsiz Regex Parser'ları dene
+    # 1. Önce Hızlı & Ücretsiz Regex Parser'ları dene
     for parser in PARSER_SIRASI:
         sonuc = parser(aciklama)
         if sonuc:
-            return sonuc
+            tam_sonuc = BOSH_SONUC.copy()
+            tam_sonuc.update(sonuc)
+            # Regex tabanlı kurallar her zaman %100 güvenilirdir
+            tam_sonuc["confidence_score"] = 100
+            tam_sonuc["explanation"] = "Banka formatı regex ile kesin olarak tanındı."
+            return tam_sonuc
             
-    # Eğer Regex ile çözülemezse AI Agent'a gönder (Opsiyonel)
-    # import edip sadece OPENAI_API_KEY varsa deneyelim
+    # 2. Eğer Regex ile çözülemezse Yapay Zeka (Gemini Agent) devralır
     try:
         from ai_agent import parse_with_ai
-        from config import OPENAI_API_KEY
-        if OPENAI_API_KEY:
-            ai_sonuc = parse_with_ai(aciklama, islem_yonu)
-            if ai_sonuc:
-                # GPT formatını bizim formata eşitlemek için eksikleri tamamla
-                tam_sonuc = BOSH_SONUC.copy()
-                tam_sonuc.update(ai_sonuc)
-                return tam_sonuc
-    except ImportError:
-        pass
+        ai_sonuc = parse_with_ai(aciklama, islem_yonu)
+        if ai_sonuc:
+            tam_sonuc = BOSH_SONUC.copy()
+            tam_sonuc.update(ai_sonuc)
+            return tam_sonuc
+    except Exception as e:
+        print(f"AI Parse Hatası: {e}")
         
     # Her şeye rağmen anlaşılamazsa BOSH_SONUC dön
     return BOSH_SONUC.copy()
