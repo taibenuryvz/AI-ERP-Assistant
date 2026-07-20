@@ -9,6 +9,9 @@ import logging
 import os
 from typing import Dict, Optional
 import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 is_first_call = True  # İlk çağrıyı takip etmek için global değişken
