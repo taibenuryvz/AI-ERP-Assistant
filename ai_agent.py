@@ -82,7 +82,7 @@ def parse_with_ai(aciklama: str, islem_yonu: str) -> Optional[Dict]:
         
     try:
         model = genai.GenerativeModel(
-            'gemini-1.5-flash',
+            'gemini-2.5-flash',
             system_instruction=get_system_prompt(),
             generation_config={"response_mime_type": "application/json", "temperature": 0.1}
         )
