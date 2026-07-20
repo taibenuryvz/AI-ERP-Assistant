@@ -15,6 +15,8 @@ KULLANIM:
 import re
 import pandas as pd
 from pathlib import Path
+import os
+import json
 
 # ─────────────────────────────────────────
 # 0. AYARLAR
@@ -26,15 +28,98 @@ CIKIS_DOSYA  = r"C:\Users\HUAWEİ\Downloads\Hesap_Hareketleri_PARSED.xlsx"
 # ─────────────────────────────────────────
 # 1. VERİYİ OKU
 # ─────────────────────────────────────────
-def veri_oku(dosya: str) -> pd.DataFrame:
-    """Başlıksız Excel dosyasını okur, standart kolon adları atar."""
+def get_column_aliases() -> dict:
+    alias_file = os.path.join(os.path.dirname(__file__), "column_aliases.json")
+    if os.path.exists(alias_file):
+        with open(alias_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+def veri_oku(dosya: str):
+    """
+    Bank Agnostic Excel Okuyucu
+    Döner: df, report_string
+    """
     df = pd.read_excel(dosya, header=None, dtype=str, keep_default_na=False)
-    df.columns = ["islem_tarihi", "fis_no", "aciklama_ham", "yon_kod"]
-    # Yön: 100 → GİRİŞ, -100 → ÇIKIŞ
-    df["islem_yonu"] = df["yon_kod"].str.strip().apply(
-        lambda x: "GİRİŞ" if x == "100" else ("ÇIKIŞ" if x == "-100" else x)
-    )
-    return df
+    aliases = get_column_aliases()
+    
+    header_idx = -1
+    matched_canonical = {} # {eski_kolon_idx: "islem_tarihi"}
+    
+    # 1. 25 satır taraması (Header Tespiti)
+    for i in range(min(25, len(df))):
+        row = df.iloc[i].astype(str).str.lower().str.strip()
+        matches = {}
+        for col_idx, cell_val in enumerate(row):
+            if not cell_val: continue
+            for canon_name, possible_names in aliases.items():
+                if cell_val in possible_names:
+                    matches[col_idx] = canon_name
+        
+        values = list(matches.values())
+        # Tarih ve Açıklama (veya Tarih ve Tutar) geçiyorsa Header kabul et
+        if "islem_tarihi" in values and ("aciklama_ham" in values or "tutar" in values or "borc" in values):
+            header_idx = i
+            matched_canonical = matches
+            break
+            
+    report_lines = ["=== COLUMN MAPPING REPORT ==="]
+    
+    # 2. Header Bulunduysa Eşleştirme
+    if header_idx != -1:
+        report_lines.append(f"Header tespit edildi: Satır {header_idx + 1}")
+        df = df.iloc[header_idx + 1:].reset_index(drop=True)
+        
+        new_cols = []
+        ignored_cols = []
+        for col_idx in range(len(df.columns)):
+            if col_idx in matched_canonical:
+                canon_name = matched_canonical[col_idx]
+                new_cols.append(canon_name)
+                report_lines.append(f"Eşleşti: Sütun {col_idx+1} -> {canon_name}")
+            else:
+                raw_name = f"raw_col_{col_idx}"
+                new_cols.append(raw_name)
+                ignored_cols.append(raw_name)
+                
+        df.columns = new_cols
+        if ignored_cols:
+            report_lines.append(f"Ignore Edildi (Silinmedi, df'te saklanıyor): {len(ignored_cols)} adet fazlalık sütun.")
+        
+        # Validasyon
+        if "aciklama_ham" not in df.columns:
+            raise ValueError("Açıklama sütunu bulunamadı! Lütfen Excel dosyasında 'Açıklama' veya 'Detay' başlıklı bir sütun olduğundan emin olun.")
+            
+        # Yön Hesaplama Kurgusu
+        if "yon_kod" not in df.columns:
+            if "borc" in df.columns and "alacak" in df.columns:
+                df["islem_yonu"] = df.apply(lambda r: "GİRİŞ" if str(r.get("alacak", "")).strip() else "ÇIKIŞ", axis=1)
+            else:
+                df["islem_yonu"] = "BELİRSİZ"
+        else:
+            df["islem_yonu"] = df["yon_kod"].str.strip().apply(
+                lambda x: "GİRİŞ" if x == "100" else ("ÇIKIŞ" if x == "-100" else x)
+            )
+            
+    else:
+        # 3. Ziraat Fallback (Başlıksız Orijinal Format)
+        report_lines.append("Header bulunamadı! Geleneksel Ziraat (4 kolonlu başlıksız) formatı varsayılıyor.")
+        if len(df.columns) > 4:
+            new_cols = ["islem_tarihi", "fis_no", "aciklama_ham", "yon_kod"]
+            for x in range(4, len(df.columns)):
+                new_cols.append(f"raw_col_{x}")
+                report_lines.append(f"Fazlalık Sütun {x+1} df'te 'raw_col_{x}' olarak saklandı.")
+            df.columns = new_cols
+        elif len(df.columns) == 4:
+            df.columns = ["islem_tarihi", "fis_no", "aciklama_ham", "yon_kod"]
+        else:
+            raise ValueError(f"Hatalı format! Başlıksız modda en az 4 sütun bekleniyor, ancak {len(df.columns)} bulundu.")
+            
+        df["islem_yonu"] = df["yon_kod"].str.strip().apply(
+            lambda x: "GİRİŞ" if x == "100" else ("ÇIKIŞ" if x == "-100" else x)
+        )
+    
+    return df, "\n".join(report_lines)
 
 
 # ─────────────────────────────────────────

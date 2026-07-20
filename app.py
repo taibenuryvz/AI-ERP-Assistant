@@ -14,9 +14,12 @@ uploaded_file = st.file_uploader("Banka Ekstresi Excel Dosyasını Yükleyin", t
 if uploaded_file is not None:
     # Dosyayı oku
     try:
-        df = veri_oku(uploaded_file)
+        df, mapping_report = veri_oku(uploaded_file)
         st.success(f"✅ Dosya başarıyla yüklendi! Toplam **{len(df)}** satır tespit edildi.")
         
+        with st.expander("📊 Column Mapping Report (Bank Agnostic)", expanded=True):
+            st.code(mapping_report, language="text")
+            
         st.subheader("1. Ham Veri Önizlemesi")
         st.dataframe(df.head(5))
         

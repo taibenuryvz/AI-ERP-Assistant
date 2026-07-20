@@ -1,0 +1,9 @@
+{
+  "islem_tarihi": ["tarih", "işlem tarihi", "date", "valör", "islem_tarihi", "valör tarihi", "işlem_tarihi"],
+  "fis_no": ["fiş no", "fis no", "işlem no", "referans no", "dekont no", "belge no"],
+  "aciklama_ham": ["açıklama", "detay", "işlem açıklaması", "description", "aciklama"],
+  "yon_kod": ["yön", "yon", "b/a", "borç/alacak"],
+  "tutar": ["tutar", "işlem tutarı", "amount", "meblağ"],
+  "borc": ["borç", "debit", "çıkış", "b", "cikis"],
+  "alacak": ["alacak", "credit", "giriş", "a", "giris"]
+}
